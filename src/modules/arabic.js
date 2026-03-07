@@ -97,7 +97,8 @@ import { jsPDF } from "../jspdf.js";
     0x06cc: [0xfbfc, 0xfbfd, 0xfbfe, 0xfbff], // ARABIC LETTER FARSI YEH
     0x06d0: [0xfbe4, 0xfbe5, 0xfbe6, 0xfbe7], //ARABIC LETTER E
     0x06d2: [0xfbae, 0xfbaf], // ARABIC LETTER YEH BARREE
-    0x06d3: [0xfbb0, 0xfbb1] // ARABIC LETTER YEH BARREE WITH HAMZA ABOVE
+    0x06d3: [0xfbb0, 0xfbb1], // ARABIC LETTER YEH BARREE WITH HAMZA ABOVE
+    0x06d5: [0xfee9, 0xfeea], // ە  isolated, final only (non-connector)
   };
 
   /*
@@ -128,7 +129,10 @@ import { jsPDF } from "../jspdf.js";
       0x0650: 0xfc62 // Shadda + Kasra
     }
   };
-
+	var lamAlefLigatureToBase = {
+		  0xFEFB: [0x0627, 0x0644], // 'ﻻ' → ['ل','ا'] (isolated)
+		  0xFEFC: [0x0627, 0x0644]  // 'ﻼ' → ['ل','ا'] (final)
+	};
   var arabic_diacritics = {
     1612: 64606, // Shadda + Dammatan
     1613: 64607, // Shadda + Kasratan
@@ -144,8 +148,34 @@ import { jsPDF } from "../jspdf.js";
   var finalForm = 1;
   var initialForm = 2;
   var medialForm = 3;
-
+	var presentationToBaseMap = null;
+	
   jsPDFAPI.__arabicParser__ = {};
+
+	var getBaseCodeFromPresentation = (
+		jsPDFAPI.__arabicParser__.getBaseCodeFromPresentation = function(code) {
+
+		if (typeof code !== "number") {
+			return null;
+		}
+		if (lamAlefLigatureToBase[code]) return lamAlefLigatureToBase[code];
+		if (!presentationToBaseMap) {
+			presentationToBaseMap = {};
+
+			for (var base in arabicSubstitionA) {
+			  if (!arabicSubstitionA.hasOwnProperty(base)) continue;
+
+			  var forms = arabicSubstitionA[base];
+
+			  for (var i = 0; i < forms.length; i++) {
+			    presentationToBaseMap[forms[i]] = parseInt(base);
+			  }
+			}
+		}
+
+		return presentationToBaseMap[code] || null;
+		}
+	);
 
   //private
   var isInArabicSubstitutionA = (jsPDFAPI.__arabicParser__.isInArabicSubstitutionA = function(

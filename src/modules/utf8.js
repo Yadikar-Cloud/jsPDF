@@ -14,73 +14,109 @@ import { toPDFName } from "../libs/pdfname.js";
   /* comment : The character id of a 2-byte string is converted to a hexadecimal number by obtaining */
   /*   the corresponding glyph id and width, and then adding padding to the string.                  */
   /***************************************************************************************************/
-  var pdfEscape16 = (jsPDFAPI.pdfEscape16 = function(text, font) {
-    var widths = font.metadata.Unicode.widths;
-    var padz = ["", "0", "00", "000", "0000"];
-    var ar = [""];
-    for (var i = 0, l = text.length, t; i < l; ++i) {
-      t = font.metadata.characterToGlyph(text.charCodeAt(i));
-      font.metadata.glyIdsUsed.push(t);
-      font.metadata.toUnicode[t] = text.charCodeAt(i);
-      if (widths.indexOf(t) == -1) {
-        widths.push(t);
-        widths.push([parseInt(font.metadata.widthOfGlyph(t), 10)]);
-      }
-      if (t == "0") {
-        //Spaces are not allowed in cmap.
-        return ar.join("");
-      } else {
-        t = t.toString(16);
-        ar.push(padz[4 - t.length], t);
-      }
-    }
-    return ar.join("");
-  });
+	var pdfEscape16 = (jsPDFAPI.pdfEscape16 = function(text, font) {
+		var parser = jsPDF.API.__arabicParser__;
+		var getBaseCode = parser && parser.getBaseCodeFromPresentation;
+		var widths = font.metadata.Unicode.widths;
+		var padz = ["", "0", "00", "000", "0000"];
+		var ar = [""];
 
-  var toUnicodeCmap = function(map) {
-    var code, codes, range, unicode, unicodeMap, _i, _len;
-    unicodeMap =
-      "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo <<\n  /Registry (Adobe)\n  /Ordering (UCS)\n  /Supplement 0\n>> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000><ffff>\nendcodespacerange";
-    codes = Object.keys(map).sort(function(a, b) {
-      return a - b;
-    });
+		for (var i = 0, l = text.length; i < l; ++i) {
+		  var inputCode = text.charCodeAt(i);
 
-    range = [];
-    for (_i = 0, _len = codes.length; _i < _len; _i++) {
-      code = codes[_i];
-      if (range.length >= 100) {
-        unicodeMap +=
-          "\n" +
-          range.length +
-          " beginbfchar\n" +
-          range.join("\n") +
-          "\nendbfchar";
-        range = [];
-      }
+		  // Get the glyph ID for the presentation form
+		  var t = font.metadata.characterToGlyph(inputCode);
+		  font.metadata.glyIdsUsed.push(t);
 
-      if (
-        map[code] !== undefined &&
-        map[code] !== null &&
-        typeof map[code].toString === "function"
-      ) {
-        unicode = ("0000" + map[code].toString(16)).slice(-4);
-        code = ("0000" + (+code).toString(16)).slice(-4);
-        range.push("<" + code + "><" + unicode + ">");
-      }
-    }
+		  // Look up the original Unicode from the font's cmap table
+		  var cmapUnicode = inputCode; // fallback
+		  if (font.metadata.glyphs && font.metadata.glyphs[t]) {
+		    var u = font.metadata.glyphs[t].unicode;
+		    if (typeof u === "number") cmapUnicode = u;
+		  }
 
-    if (range.length) {
-      unicodeMap +=
-        "\n" +
-        range.length +
-        " beginbfchar\n" +
-        range.join("\n") +
-        "\nendbfchar\n";
-    }
-    unicodeMap +=
-      "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend";
-    return unicodeMap;
-  };
+		  // Optionally map to base form using Arabic parser callback
+		  var finalUnicode = cmapUnicode;
+		  if (getBaseCode) {
+		    var reversed = getBaseCode(cmapUnicode);
+		    if (reversed != null) finalUnicode = reversed;
+		  }
+
+		  // Store Unicode for text extraction
+		  if (font.metadata.toUnicode[t] === undefined) {
+		    font.metadata.toUnicode[t] = finalUnicode;
+		  }
+
+		  // Track glyph widths for the font
+		  if (widths.indexOf(t) === -1) {
+		    widths.push(t);
+		    widths.push([parseInt(font.metadata.widthOfGlyph(t), 10)]);
+		  }
+
+		  // Spaces are not allowed in cmap
+		  if (t === 0) {
+		    return ar.join("");
+		  }
+
+		  // Push the glyph ID as hex (PDF uses glyph IDs in content stream)
+		  var hex = t.toString(16);
+		  ar.push(padz[4 - hex.length], hex);
+		}
+
+		return ar.join("");
+	});
+
+	var toUnicodeCmap = function(map) {
+		  var code, codes, range, unicode, unicodeMap, _i, _len;
+		  unicodeMap =
+		    "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo <<\n  /Registry (Adobe)\n  /Ordering (UCS)\n  /Supplement 0\n>> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000><ffff>\nendcodespacerange";
+		  codes = Object.keys(map).sort(function(a, b) {
+		    return a - b;
+		  });
+		  range = [];
+		  for (_i = 0, _len = codes.length; _i < _len; _i++) {
+		    code = codes[_i];
+		    if (range.length >= 100) {
+		      unicodeMap +=
+		        "\n" +
+		        range.length +
+		        " beginbfchar\n" +
+		        range.join("\n") +
+		        "\nendbfchar";
+		      range = [];
+		    }
+
+		    if (map[code] !== undefined && map[code] !== null) {
+		      code = ("0000" + (+code).toString(16)).slice(-4);
+
+		      // *** NEW: handle ligatures (array of base codepoints) ***
+		      if (Array.isArray(map[codes[_i]])) {
+		        unicode = map[codes[_i]]
+		          .map(function(cp) {
+		            return ("0000" + cp.toString(16)).slice(-4);
+		          })
+		          .join("");
+		        range.push("<" + code + "><" + unicode + ">");
+
+		      // *** ORIGINAL: single codepoint mapping ***
+		      } else if (typeof map[codes[_i]].toString === "function") {
+		        unicode = ("0000" + map[codes[_i]].toString(16)).slice(-4);
+		        range.push("<" + code + "><" + unicode + ">");
+		      }
+		    }
+		  }
+		  if (range.length) {
+		    unicodeMap +=
+		      "\n" +
+		      range.length +
+		      " beginbfchar\n" +
+		      range.join("\n") +
+		      "\nendbfchar\n";
+		  }
+		  unicodeMap +=
+		    "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend";
+		  return unicodeMap;
+	};
 
   var identityHFunction = function(options) {
     var font = options.font;

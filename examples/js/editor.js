@@ -23,6 +23,7 @@ var jsPDFEditor = (function() {
       "annotations.js": "Annotations",
       "autoprint.js": "Auto print",
       "arabic.js": "Arabic",
+      "uyghur.js": "Uyghur",
       "russian.js": "Russian",
       "japanese.js": "Japanese",
       "password.js": "Password"
